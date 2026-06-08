@@ -1,0 +1,8 @@
+[package]
+name = "hx-cloud3-wireless-linux-driver"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hidapi = "2.6.6"
+rusb = "0.9"
