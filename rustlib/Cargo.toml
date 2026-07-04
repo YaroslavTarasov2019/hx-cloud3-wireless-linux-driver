@@ -6,3 +6,8 @@ edition = "2024"
 [dependencies]
 hidapi = "2.6.6"
 rusb = "0.9"
+evdev = "0.12"
+
+[lib]
+name = "myproj"
+crate-type = ["cdylib"]

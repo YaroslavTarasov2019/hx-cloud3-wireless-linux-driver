@@ -1,1 +1,2 @@
-/target
+/rustlib/target
+/cpp/my_app
