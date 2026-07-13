@@ -6,12 +6,16 @@ mod connecting;
 
 enum Command 
 {
-    MainCommandOfHeadset = 0x66,
-    AutoShutdownStatus = 0x85, 
-    BatteryStatus = 0x89,
+    Empty = 0x00,
     ChangeMicroMonitoring = 0x01,
     TimeToAutoShutdown = 0x02,
-    Empty = 0x00
+    MainCommandOfHeadset = 0x66,
+    GetStatusOfMicMonitoring = 0x84,
+    GetAutoShutdownStatus = 0x85, 
+    BatteryStatus = 0x89,
+    ChargingStatus = 0x8A,
+    GetFullMuteMode = 0x87,
+    SetFullMuteMode = 0x04
 }
 
 enum CommandLevel0
@@ -31,7 +35,7 @@ enum CommandLevel1
     
 }
 
-pub fn send_command(device: &HidDevice, report_id: u8, cmd: u8, data: &[u8]) 
+fn send_command(device: &HidDevice, report_id: u8, cmd: u8, data: &[u8]) 
 {
     let mut tx_buf = [0u8; 62];
     tx_buf[0] = report_id;
@@ -59,94 +63,100 @@ pub fn send_command(device: &HidDevice, report_id: u8, cmd: u8, data: &[u8])
     let _ = device.write(&tx_buf_rep);
 }
 
-pub fn clear_buffer(device: &HidDevice) 
+fn clear_buffer(device: &HidDevice) 
 {
     let mut trash = [0u8; 64];
     while device.read_timeout(&mut trash, 5).unwrap_or(0) > 0 {}
 }
 
+fn perform_command(cmd: Command, data: &[u8], read_response: bool, delay: u64, timeout: i32) -> Result<[u8; 64], i32> {
+    let device = connecting::connect().map_err(|_| -1)?;
+    
+    clear_buffer(&device);
+    send_command(&device, Command::MainCommandOfHeadset as u8, cmd as u8, data);
+    
+    if !read_response {
+        return Ok([0u8; 64]);
+    }
+
+    thread::sleep(Duration::from_millis(delay));
+    let mut rx_buf = [0u8; 64];
+    match device.read_timeout(&mut rx_buf, timeout) {
+        Ok(bytes) if bytes > 0 => Ok(rx_buf),
+        _ => Err(-3),
+    }
+}
+
+
+
 
 #[unsafe(no_mangle)]
-pub extern "C" fn battery_status() -> i32
-{
-    let device = connecting::connect().expect("Failed to connect");
+pub extern "C" fn get_battery_status() -> i32 {
+    match perform_command(Command::BatteryStatus, &[], true, 100, 500) {
+        Ok(buf) => {
+            let offset = if buf[0] == Command::Empty as u8 { 1 } else { 0 };
+            buf[offset + 4] as i32
+        },
+        Err(e) => e,
+    }
+}
 
-    clear_buffer(&device);
-    send_command(&device, Command::MainCommandOfHeadset as u8, 0x89, &[]);
+#[unsafe(no_mangle)]
+pub extern "C" fn get_micmon_status() -> i32 {
+    match perform_command(Command::GetStatusOfMicMonitoring, &[], true, 100, 500) {
+        Ok(buf) => {
+            buf[2] as i32
+        },
+        Err(e) => e,
+    }
+}
 
-    thread::sleep(Duration::from_millis(100));
+#[unsafe(no_mangle)]
+pub extern "C" fn get_charging_status() -> i32 {
+    match perform_command(Command::ChargingStatus, &[], true, 100, 200) {
+        Ok(buf) => {
+            buf[2] as i32
+        },
+        Err(e) => e,
+    }
+}
 
-    let mut rx_buf = [0u8; 64];
-    match device.read_timeout(&mut rx_buf, 500) 
-    {
-        Ok(bytes_read) => 
-        {
-            if bytes_read == 0 
+#[unsafe(no_mangle)]
+pub extern "C" fn get_full_mute_mode() -> i32 {
+    match perform_command(Command::GetFullMuteMode, &[], true, 100, 200) {
+        Ok(buf) => {
+            buf[2] as i32
+        },
+        Err(e) => e,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn get_status_of_auto_shutdown() -> i32 {
+    match perform_command(Command::GetAutoShutdownStatus, &[], true, 150, 400) {
+        Ok(rx_buf) => {
+            let offset = if rx_buf[0] == Command::Empty as u8 { 1 } else { 0 };
+            
+            if rx_buf[offset] == Command::MainCommandOfHeadset as u8 && 
+               rx_buf[offset + 1] == Command::GetAutoShutdownStatus as u8 
             {
-                println!("Headset did not respond. Try turning it on or playing audio.");
-                return -1;
-            } else {
-                let offset = if rx_buf[0] == Command::Empty as u8 { 1 } else { 0 };
-
-                if rx_buf[offset] == Command::MainCommandOfHeadset as u8 && rx_buf[offset + 1] == Command::BatteryStatus as u8 
-                {
-                    let battery_percentage = rx_buf[offset + 4];
-                    return battery_percentage as i32;
+                let timeout = rx_buf[offset + 2];
+                if timeout == 0 {
+//                    println!("Auto shutdown: Disabled (Never)");
+                    return 1;
                 } else {
-                    println!("Received unexpected response: {:02X} {:02X}", rx_buf[offset], rx_buf[offset+1]);
-                    return -2;
+//                    println!("Auto shutdown: After {} minutes of inactivity", timeout);
+                    return timeout as i32;
                 }
             }
-        }
-        Err(e) => 
-        {
-            eprintln!("Read error: {}", e);
-            return -3;
+            -1
+        },
+        Err(_) => {
+//            println!("Auto shutdown: Failed to retrieve setting");
+            -2
         }
     }
 }
-
-#[unsafe(no_mangle)]
-pub extern "C" fn status_of_auto_shutdown() -> i32
-{
-    let device = connecting::connect().expect("Failed to connect");
-
-    let mut timeout_config_res: Option<u8> = None;
-
-    clear_buffer(&device);
-    send_command(&device, Command::MainCommandOfHeadset as u8, Command::AutoShutdownStatus as u8, &[]);
-
-    thread::sleep(Duration::from_millis(150));
-
-    let mut rx_buf = [0u8; 64];
-    if let Ok(bytes) = device.read_timeout(&mut rx_buf, 400) 
-    {
-        if bytes > 0 
-        {
-            let offset = if rx_buf[0] == Command::Empty as u8 { 1 } else { 0 };
-            if rx_buf[offset] == Command::MainCommandOfHeadset as u8 && rx_buf[offset + 1] == Command::AutoShutdownStatus as u8 
-            {
-                timeout_config_res = Some(rx_buf[offset + 2]);
-            }
-        }
-    }
-
-    if let Some(timeout) = timeout_config_res 
-    {
-        if timeout == 0 
-        {
-            println!("Auto shutdown: Disabled (Never)");
-            return 1;
-        } else {
-            println!("Auto shutdown: After {} minutes of inactivity", timeout);
-            return timeout as i32;
-        }
-    } else {
-        println!("Auto shutdown: Failed to retrieve setting");
-        return -1;
-    }
-}
-
 
 #[unsafe(no_mangle)]
 pub extern "C" fn change_time_to_auto_shutdown(target_minutes: i32) -> i32
@@ -188,6 +198,16 @@ pub extern "C" fn change_time_to_auto_shutdown(target_minutes: i32) -> i32
             return -3;
         },
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn set_full_mute_mode(enable: bool) -> i32 {
+    let device = connecting::connect().expect("Failed to connect");
+    let val = if enable { 1 } else { 0 };
+    
+    clear_buffer(&device);
+    send_command(&device, Command::MainCommandOfHeadset as u8, Command::SetFullMuteMode as u8, &[val]);
+    1
 }
 
 #[unsafe(no_mangle)]
