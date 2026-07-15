@@ -31,8 +31,7 @@ enum CommandLevel1
     MicMute = 0x0a,
     Power = 0x0f,
     MicConnection = 0x07,
-    DeviceConnection = 0x0c,
-    
+    DeviceConnection = 0x0c
 }
 
 fn send_command(device: &HidDevice, report_id: u8, cmd: u8, data: &[u8]) 
@@ -166,7 +165,7 @@ pub extern "C" fn change_time_to_auto_shutdown(target_minutes: i32) -> i32
     clear_buffer(&device);
     send_command(&device, Command::MainCommandOfHeadset as u8, Command::TimeToAutoShutdown as u8, &[target_minutes as u8]);
 
-    println!("Sending command: Set sleep timer to {} minutes...", target_minutes);
+//    println!("Sending command: Set sleep timer to {} minutes...", target_minutes);
 
     thread::sleep(Duration::from_millis(600));
 
@@ -175,7 +174,7 @@ pub extern "C" fn change_time_to_auto_shutdown(target_minutes: i32) -> i32
         Ok(bytes_read) => {
             if bytes_read == 0 
             {
-                println!("Headset did not send confirmation.");
+      //          println!("Headset did not send confirmation.");
                 return -1;
             } else {
                 let offset = if rx_buf[0] == Command::Empty as u8 { 1 } else { 0 };
@@ -183,11 +182,11 @@ pub extern "C" fn change_time_to_auto_shutdown(target_minutes: i32) -> i32
                 if rx_buf[offset] == Command::MainCommandOfHeadset as u8 && rx_buf[offset + 1] == Command::TimeToAutoShutdown as u8 
                 {
                     let confirmed_minutes = rx_buf[offset + 2];
-                    println!("Successfully written to headset memory!");
-                    println!("New auto shutdown timer: {} min.", confirmed_minutes);
+               //     println!("Successfully written to headset memory!");
+               //     println!("New auto shutdown timer: {} min.", confirmed_minutes);
                     return confirmed_minutes as i32;
                 } else {
-                    println!("Received unexpected response: {:02X} {:02X}", rx_buf[offset], rx_buf[offset+1]);
+             //       println!("Received unexpected response: {:02X} {:02X}", rx_buf[offset], rx_buf[offset+1]);
                     return -2;
                 }
             }
@@ -201,9 +200,9 @@ pub extern "C" fn change_time_to_auto_shutdown(target_minutes: i32) -> i32
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn set_full_mute_mode(enable: bool) -> i32 {
+pub extern "C" fn set_full_mute_mode(enable: u8) -> i32 {
     let device = connecting::connect().expect("Failed to connect");
-    let val = if enable { 1 } else { 0 };
+    let val = enable;
     
     clear_buffer(&device);
     send_command(&device, Command::MainCommandOfHeadset as u8, Command::SetFullMuteMode as u8, &[val]);
@@ -211,19 +210,19 @@ pub extern "C" fn set_full_mute_mode(enable: bool) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn change_mic_monitoring(enable: bool) -> i32
+pub extern "C" fn change_mic_monitoring(enable: u8) -> i32
 {
     let device = connecting::connect().expect("Failed to connect");
 
     clear_buffer(&device);
-    send_command(&device, Command::MainCommandOfHeadset as u8, Command::ChangeMicroMonitoring as u8, &[if enable { Command::ChangeMicroMonitoring as u8 } else { Command::Empty as u8 }]);
+    send_command(&device, Command::MainCommandOfHeadset as u8, Command::ChangeMicroMonitoring as u8, &[if enable == 1 { Command::ChangeMicroMonitoring as u8 } else { Command::Empty as u8 }]);
 
-    if enable 
+    if enable == 1 
     {
-        println!("Microphone monitoring: ENABLED");
+    //    println!("Microphone monitoring: ENABLED");
         return 1;
     } else {
-        println!("Microphone monitoring: DISABLED");
+    //    println!("Microphone monitoring: DISABLED");
         return 2;
     }
 }
